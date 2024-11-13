@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "backend"
+version = "0.1.0"
+description = ""
+authors = ["RovarQRoom <rovar.07000120@outlook.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+Flask = "^3.0.2"
+Flask-Cors = "^4.0.0"
+opencv-python-headless = "^4.9.0.80"
+PassportEye = "^2.2.1"
+appwrite = "^5.0.2"
+dlib = "^19.24.2"
+pytesseract = "^0.3.10"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
