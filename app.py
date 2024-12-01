@@ -91,42 +91,179 @@ def process_passport():
             mrz_data = read_mrz(processed_filepath)
             
         mrz_dict = mrz_data.to_dict()
-        print(mrz_dict)
-        # Correct and format data from MRZ
-        personal_number = mrz_dict.get("personal_number", "").replace("<", "")
-        surname = mrz_dict.get("surname", "").lstrip("Q")
-        names = mrz_dict.get("names", "").replace("X", "")
-        country_correction = {"ITR": "IRQ"}  # Example of country code correction
-        corrected_country = country_correction.get(mrz_dict.get("country"), mrz_dict.get("country"))
         
-        # Format dates
-        dob = datetime.strptime(mrz_dict.get("date_of_birth", "000000"), "%y%m%d").strftime("%Y-%m-%d")
-        exp_date = datetime.strptime(mrz_dict.get("expiration_date", "000000"), "%y%m%d").strftime("%Y-%m-%d")
+        # Clean and format the names
+        names = mrz_dict.get("names", "").replace("<", " ").strip()
+        # Remove any extra spaces between words
+        names = " ".join(filter(None, names.split()))
+        
+        surname = mrz_dict.get("surname", "").replace("<", "").strip()
+        
+        # Handle date parsing with proper century detection
+        def parse_mrz_date(date_str):
+            try:
+                year = int(date_str[:2])
+                month = int(date_str[2:4])
+                day = int(date_str[4:6])
+                
+                # Determine century (19xx or 20xx)
+                if year > 30:  # Assuming dates before 1930 are unlikely
+                    year += 1900
+                else:
+                    year += 2000
+                    
+                return f"{year}-{month:02d}-{day:02d}"
+            except:
+                return None
+
+        dob_str = mrz_dict.get("date_of_birth", "")
+        exp_str = mrz_dict.get("expiration_date", "")
+        
+        dob = parse_mrz_date(dob_str) if dob_str else None
+        exp_date = parse_mrz_date(exp_str) if exp_str else None
 
         # Process the face image and store it
         app.logger.info(f"Calling extract_face with filepath {filepath}")
         face_filename = extract_face(filepath)
         app.logger.info(f"Face filename: {face_filename}")
-        # Assuming `storage.create_file` and `ID.unique` work as expected.
+        
         result = storage.create_file('6602a873de0e9ff815f0', ID.unique(), InputFile.from_path(face_filename or filepath))
         file_url = f"https://cloud.appwrite.io/v1/storage/buckets/6602a873de0e9ff815f0/files/{result['$id']}/view?project=6602a79975c04c55b0a3"
 
         # Assemble the data
         extracted_data = {
-            "passport_number": mrz_dict.get("number"),
-            "country": corrected_country,
+            "passport_number": mrz_dict.get("number", "").strip(),
+            "country": mrz_dict.get("country", "").strip(),
             "surname": surname,
             "names": names,
-            "nationality": mrz_dict.get("nationality"),
+            "nationality": mrz_dict.get("nationality", "").strip(),
             "date_of_birth": dob,
-            "sex": mrz_dict.get("sex"),
+            "sex": mrz_dict.get("sex", "").strip(),
             "expiration_date": exp_date,
-            "personal_number": personal_number,
+            "personal_number": mrz_dict.get("personal_number", "").replace("<", "").strip(),
             "face_image_url": file_url
         }
 
         return jsonify(extracted_data)
     except Exception as e:
+        app.logger.error(f"Error processing passport: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/process_multiple_passports", methods=["POST"])
+def process_multiple_passports():
+    try:
+        # Check if any files were sent
+        if "files" not in request.files:
+            return jsonify({"error": "No files part"}), 400
+        
+        files = request.files.getlist("files")
+        
+        # Check if any files were selected
+        if not files or files[0].filename == "":
+            return jsonify({"error": "No selected files"}), 400
+            
+        # Limit the number of files
+        if len(files) > 15:
+            return jsonify({"error": "Maximum 15 files allowed"}), 400
+            
+        results = []
+        
+        for file in files:
+            try:
+                # Save the uploaded file
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                file.save(filepath)
+                app.logger.info(f"Saved file to {filepath}")
+                
+                # Process the MRZ
+                mrz_data = read_mrz(filepath)
+                if mrz_data is None:
+                    # Open the saved image and process it
+                    image = cv2.imread(filepath)
+                    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    _, thresh_image = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                    processed_filepath = os.path.join(UPLOAD_FOLDER, 'processed_' + filename)
+                    cv2.imwrite(processed_filepath, thresh_image)
+                    mrz_data = read_mrz(processed_filepath)
+                
+                if mrz_data is None:
+                    results.append({
+                        "filename": filename,
+                        "error": "Could not read MRZ data from image"
+                    })
+                    continue
+                    
+                mrz_dict = mrz_data.to_dict()
+                
+                # Clean and format the names
+                names = mrz_dict.get("names", "").replace("<", " ").strip()
+                names = " ".join(filter(None, names.split()))
+                surname = mrz_dict.get("surname", "").replace("<", "").strip()
+                
+                # Handle date parsing with proper century detection
+                def parse_mrz_date(date_str):
+                    try:
+                        year = int(date_str[:2])
+                        month = int(date_str[2:4])
+                        day = int(date_str[4:6])
+                        
+                        # Determine century (19xx or 20xx)
+                        if year > 30:  # Assuming dates before 1930 are unlikely
+                            year += 1900
+                        else:
+                            year += 2000
+                            
+                        return f"{year}-{month:02d}-{day:02d}"
+                    except:
+                        return None
+
+                dob_str = mrz_dict.get("date_of_birth", "")
+                exp_str = mrz_dict.get("expiration_date", "")
+                
+                dob = parse_mrz_date(dob_str) if dob_str else None
+                exp_date = parse_mrz_date(exp_str) if exp_str else None
+
+                # Process the face image and store it
+                face_filename = extract_face(filepath)
+                
+                result = storage.create_file('6602a873de0e9ff815f0', ID.unique(), InputFile.from_path(face_filename or filepath))
+                file_url = f"https://cloud.appwrite.io/v1/storage/buckets/6602a873de0e9ff815f0/files/{result['$id']}/view?project=6602a79975c04c55b0a3"
+
+                # Assemble the data
+                extracted_data = {
+                    "filename": filename,
+                    "passport_number": mrz_dict.get("number", "").strip(),
+                    "country": mrz_dict.get("country", "").strip(),
+                    "surname": surname,
+                    "names": names,
+                    "nationality": mrz_dict.get("nationality", "").strip(),
+                    "date_of_birth": dob,
+                    "sex": mrz_dict.get("sex", "").strip(),
+                    "expiration_date": exp_date,
+                    "personal_number": mrz_dict.get("personal_number", "").replace("<", "").strip(),
+                    "face_image_url": file_url
+                }
+                
+                results.append(extracted_data)
+                
+            except Exception as e:
+                results.append({
+                    "filename": filename,
+                    "error": str(e)
+                })
+                continue
+                
+        return jsonify({
+            "total_processed": len(files),
+            "successful": len([r for r in results if "error" not in r]),
+            "failed": len([r for r in results if "error" in r]),
+            "results": results
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error processing multiple passports: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
