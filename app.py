@@ -17,7 +17,7 @@ storage = get_storage()
 app.logger.setLevel(logging.INFO)
 
 # Use Flask's instance path to construct the path to the uploads directory
-UPLOAD_FOLDER = os.path.join("", "static/uploads")
+UPLOAD_FOLDER = os.path.join("/tmp", "uploads")
 # Ensure the upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -268,4 +268,5 @@ def process_multiple_passports():
 
 
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
